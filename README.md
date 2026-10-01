@@ -1,6 +1,6 @@
 # RF Band Calculator — 手機離線版（PWA）
 
-功能與 Windows 版 v1.3.0 相同：4G LTE / 5G NR、Wi-Fi、GNSS、Cable Loss、FSPL。
+目前版本 **v1.4.0**：4G LTE / 5G NR、Wi-Fi、GNSS、Cable Loss、FSPL，支援中文 / English。
 安裝到 iPhone / Android 主畫面後，**開飛航模式也能使用**。完全免費，不需要 App Store。
 
 ## 檔案
@@ -10,6 +10,7 @@
 | `index.html` | 主畫面 |
 | `core.js` | 計算核心與頻段資料 |
 | `app.js` | 介面操作 |
+| `i18n.js` | 英文翻譯字典 |
 | `sw.js` | 離線快取（讓 App 在沒有網路時也能開啟） |
 | `manifest.webmanifest`、`icons/` | 主畫面圖示與 App 設定 |
 
@@ -66,3 +67,15 @@
 ## 隱私
 
 所有計算都在手機上完成，輸入的數值只儲存在本機，不會傳送到任何地方。
+
+---
+
+## 版本紀錄
+
+### v1.4.0
+* 介面改為無印風格配色（未漂白紙色、炭灰文字、低彩度自然色），支援深色模式
+* 新增中文 / English 切換（右上角「EN / 中」），選擇會記住
+* 行動網路與 Wi-Fi 新增 L / M / H 測試頻點：結果區列出頻率與 EARFCN / NR-ARFCN（FDD 含 UL），可一鍵切換，頻譜圖上標示位置
+* 行動網路新增「靈敏度測試 RB 設定（REFSENS）」：LTE 依 TS 36.101 Table 7.3.1-2；NR TDD 為全 RB；NR FDD 標示配置原則
+
+**更新方式**：上傳全部檔案（含新增的 `i18n.js`）到 GitHub，手機連網開啟一次後重新開啟即可。

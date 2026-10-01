@@ -3,13 +3,14 @@
  * 第一次開啟時下載所有檔案到裝置；之後優先使用本機快取，沒有網路也能使用。
  * 發佈新版本時：修改 VERSION（並同步修改 app.js 的 APP_VERSION）。
  */
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const CACHE_NAME = 'rfcalc-' + VERSION;
 const ASSETS = [
   './',
   './index.html',
   './core.js',
   './app.js',
+  './i18n.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',

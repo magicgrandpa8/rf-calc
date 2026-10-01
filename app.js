@@ -5,16 +5,42 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.3.0';
+  const APP_VERSION = '1.4.0';
   const CACHE_NAME = 'rfcalc-' + APP_VERSION;
   const R = window.RFCore;
   const { fmt } = R;
 
-  // [主色, 淺色, 深色面板上的亮色]
+  // 無印風格低彩度主色：[淺色模式, 深色模式]
   const THEME = {
-    LTE: ['#2B7A9E', '#6CB8DA'], NR: ['#5B5FC7', '#A3A6F2'], WIFI: ['#2E8B74', '#6FD0B4'],
-    GNSS: ['#B07A2E', '#E3B26A'], CABLE: ['#9A5B7A', '#D99BBB'], FSPL: ['#5F7F3C', '#A8C97E'],
+    LTE: ['#4E6D7F', '#8FB0C2'], NR: ['#6A6488', '#A9A3C9'], WIFI: ['#5A7867', '#9BBFA9'],
+    GNSS: ['#93733F', '#D1AF79'], CABLE: ['#8A605C', '#C99C97'], FSPL: ['#6F7748', '#AEB784'],
   };
+  const TAB_THEME = { CELL: 'LTE', WIFI: 'WIFI', GNSS: 'GNSS', CABLE: 'CABLE', FSPL: 'FSPL' };
+  const darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
+
+  // ------------------------------------------------------------ 語言
+  const I18N = window.RF_I18N || {};
+  let lang = (() => {
+    try { const v = localStorage.getItem('rfcalc.lang'); if (v === 'zh' || v === 'en') return v; } catch (e) { /* 忽略 */ }
+    return /^zh/i.test(navigator.language || '') ? 'zh' : 'en';
+  })();
+  const PUNCT = [[/（/g, ' ('], [/）/g, ')'], [/，/g, ', '], [/；/g, '; '], [/、/g, ', '], [/：/g, ': '], [/　/g, '  '],
+    [/／/g, ' / '], [/。/g, '.'], [/「/g, '"'], [/」/g, '"'], [/＋/g, '+'], [/！/g, '!']];
+  let phraseRE = null;
+  /** 中文 → 英文：以片語字典替換（長字串優先），再轉換全形標點 */
+  function tr(s) {
+    if (lang !== 'en' || s === null || s === undefined) return s;
+    s = String(s);
+    if (!/[\u3000-\u9fff\uff00-\uffef]/.test(s)) return s;
+    if (!phraseRE) {
+      const keys = Object.keys(I18N).sort((a, b) => b.length - a.length).map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+      phraseRE = new RegExp(keys.join('|'), 'g');
+    }
+    let t = s.replace(phraseRE, (m) => I18N[m]);
+    for (const [re, v] of PUNCT) t = t.replace(re, v);
+    return t.replace(/\(\s+/g, '(').replace(/\s+\)/g, ')').replace(/\s+([,.;:])/g, '$1').replace(/^\s+|\s+$/g, '').replace(/ {3,}/g, '  ');
+  }
+  window.RF_tr = tr;   // 供測試使用
   const TITLES = { WIFI: 'Wi-Fi', GNSS: 'GNSS', CABLE: 'Cable Loss', FSPL: 'FSPL' };
 
   const $ = (id) => document.getElementById(id);
@@ -48,13 +74,13 @@
   let lastOut = null;
 
   // ------------------------------------------------------------ 主題
+  const accentOf = (key) => THEME[key][darkMQ.matches ? 1 : 0];
   function applyTheme(key) {
-    const [acc, onDark] = THEME[key];
+    const acc = accentOf(key);
     const root = document.documentElement.style;
     root.setProperty('--accent', acc);
     root.setProperty('--accent-soft', acc + '1F');
-    root.setProperty('--accent-on-dark', onDark);
-    document.querySelector('meta[name="theme-color"]').setAttribute('content', '#22313F');
+    document.querySelectorAll('.tab').forEach((t) => t.style.setProperty('--tab-color', accentOf(TAB_THEME[t.dataset.tool])));
   }
   const themeKey = () => (S.tool === 'CELL' ? S.tech : S.tool);
 
@@ -64,10 +90,11 @@
     for (const [k, v] of Object.entries(attrs || {})) {
       if (v === null || v === undefined || v === false) continue;
       if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
-      else if (k === 'text') n.textContent = v;
+      else if (k === 'text') n.textContent = tr(v);
+      else if (k === 'aria-label') n.setAttribute(k, tr(v));
       else n.setAttribute(k, v === true ? '' : v);
     }
-    for (const c of kids.flat()) if (c !== null && c !== undefined) n.append(c);
+    for (const c of kids.flat()) if (c !== null && c !== undefined) n.append(typeof c === 'string' ? tr(c) : c);
     return n;
   }
   function field(label, sub, ...ctl) {
@@ -200,6 +227,16 @@
       renderTool();
     } });
     box.append(field('中心頻率', null, fIn, h('span', { class: 'unit', text: 'MHz' })));
+
+    const p = R.Cell.lmh(b, st.bw, st.scs);
+    if (p) box.append(field('測試頻點', 'L / M / H', lmhButtons((k) => p[k].n === st.ch, (k) => { st.ch = p[k].n; message = null; renderTool(); })));
+  }
+
+  /** L / M / H 快速設定按鈕 */
+  function lmhButtons(isOn, onPick) {
+    return h('div', { class: 'lmh', role: 'group' }, ['L', 'M', 'H'].map((k) =>
+      h('button', { type: 'button', 'aria-pressed': String(isOn(k)), 'aria-label': { L: '低頻點', M: '中頻點', H: '高頻點' }[k],
+        onclick: () => onPick(k), text: k })));
   }
 
   function computeCell() {
@@ -227,6 +264,11 @@
       select(info.channels.map((c) => [c, `${c}  (${fmt(R.WiFi.freq(w.band, c))})`]), w.ch, (v) => { w.ch = Number(v); renderTool(); }, '主通道'),
       stepper(1)));
     box.append(field('通道頻寬', null, select(info.bws.map((x) => [x, x]), w.bw, (v) => { w.bw = v; renderTool(); }, '通道頻寬')));
+    const p = R.WiFi.lmh(w.band, w.bw);
+    if (p) {
+      box.append(field('測試通道', 'L / M / H', lmhButtons((k) => p[k].members.includes(w.ch),
+        (k) => { w.ch = p[k].members[0]; renderTool(); })));
+    }
   }
 
   // ============================================================ GNSS
@@ -321,6 +363,7 @@
   function renderTool() {
     applyTheme(themeKey());
     $('title').textContent = S.tool === 'CELL' ? (S.tech === 'LTE' ? '4G LTE' : '5G NR') : TITLES[S.tool];
+    applyLangStatic();
     document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tool === S.tool)));
     const box = $('inputs');
     const active = document.activeElement;
@@ -363,7 +406,7 @@
       const w = out.warns[0];
       msg = { kind: /無法|不在/.test(w) ? 'err' : 'warn', text: w };
     } else if (message) msg = message;
-    if (msg) { m.className = 'msg ' + msg.kind; m.textContent = (msg.kind === 'err' ? '✕ ' : msg.kind === 'warn' ? '⚠ ' : '') + msg.text; m.hidden = false; }
+    if (msg) { m.className = 'msg ' + msg.kind; m.textContent = (msg.kind === 'err' ? '✕ ' : msg.kind === 'warn' ? '⚠ ' : '') + tr(msg.text); m.hidden = false; }
     else m.hidden = true;
 
     if (out) {
@@ -379,10 +422,10 @@
     for (const [k, v] of rows) {
       if (v === null) {
         if (open) html += '</dl></div>';
-        html += `<div class="group"><h2>${esc(k)}</h2><dl>`;
+        html += `<div class="group"><h2>${esc(tr(k))}</h2><dl>`;
         open = true;
       } else {
-        html += `<div class="row"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`;
+        html += `<div class="row"><dt>${esc(tr(k))}</dt><dd>${esc(tr(v))}</dd></div>`;
       }
     }
     if (open) html += '</dl></div>';
@@ -390,20 +433,26 @@
   }
 
   // ------------------------------------------------------------ 頻譜 / 曲線（SVG）
-  const DK = { text: '#E6ECF2', muted: '#93A4B5', bar: '#33475B', slot: '#4A6076', grid: '#33475B', other: '#5C6F82',
-    red: '#F07167', redText: '#F6A49D', amber: '#E9B44C' };
+  let DK = {};
+  function panelColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n) => cs.getPropertyValue(n).trim();
+    DK = { text: v('--p-text'), muted: v('--p-muted'), bar: v('--p-bar'), slot: v('--p-slot'), grid: v('--p-grid'),
+      other: v('--p-other'), red: v('--p-red'), redText: v('--p-red-text'), amber: v('--p-amber'), acc: v('--accent') };
+  }
 
   function readoutWidth() { return Math.max(260, $('readout').clientWidth - 24); }
 
   function renderReadout(spec) {
     if (!spec || !spec.length) { $('readout').innerHTML = ''; return; }
+    panelColors();
     $('readout').innerHTML = spec[0].type === 'curve' ? curveSVG(spec[0]) : spectrumSVG(spec);
   }
 
   function spectrumSVG(rows) {
     const W = readoutWidth();
-    const RH = 82;
-    const acc = getComputedStyle(document.documentElement).getPropertyValue('--accent-on-dark').trim() || '#6CB8DA';
+    const RH = 90;
+    const acc = DK.acc;
     const parts = [];
     const T = (x, y, s, { size = 11, weight = 400, fill = DK.text, anchor = 'start' } = {}) =>
       parts.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${esc(s)}</text>`);
@@ -415,9 +464,19 @@
       const x0 = 0, x1 = W;
       const span = (r.hi - r.lo) || 1;
       const X = (f) => x0 + (Math.min(Math.max(f, r.lo), r.lo + span) - r.lo) / span * (x1 - x0);
-      T(x0, y + 12, `${r.label}  ${fmt(r.lo)} – ${fmt(r.hi)} MHz`, { size: 12, weight: 600 });
-      if (r.chan) T(x0, y + 28, r.chanText || `頻道 ${fmt(r.chan[0])} – ${fmt(r.chan[1])} MHz`, { fill: acc, weight: 600 });
-      const by0 = y + 38, by1 = y + 56;
+      T(x0, y + 12, tr(`${r.label}  ${fmt(r.lo)} – ${fmt(r.hi)} MHz`), { size: 12, weight: 600 });
+      if (r.chan) T(x0, y + 27, tr(r.chanText || `頻道 ${fmt(r.chan[0])} – ${fmt(r.chan[1])} MHz`), { fill: acc, weight: 600 });
+      const by0 = y + 46, by1 = y + 64;
+      // L / M / H 標記（位置相近時合併顯示）
+      const marks = [];
+      for (const [f, k] of r.marks || []) {
+        const xm = X(f), near = marks.find((q) => Math.abs(q.x - xm) < 16);
+        if (near) near.k += '/' + k; else marks.push({ x: xm, k });
+      }
+      for (const q of marks) {
+        parts.push(`<path d="M${(q.x - 4).toFixed(1)} ${by0 - 7} L${(q.x + 4).toFixed(1)} ${by0 - 7} L${q.x.toFixed(1)} ${by0 - 2} Z" fill="${DK.muted}"/>`);
+        T(Math.min(Math.max(q.x, 8), x1 - 8), by0 - 10, q.k, { size: 9, weight: 700, fill: DK.muted, anchor: 'middle' });
+      }
       RECT(x0, by0, x1 - x0, by1 - by0, DK.bar, 'rx="3"');
       for (const [a, b] of r.slots || []) RECT(X(a) + 0.5, by0 + 3, X(b) - X(a) - 1, by1 - by0 - 6, DK.slot);
       const placedZ = [];
@@ -426,7 +485,7 @@
         const xm = (X(a) + X(b)) / 2;
         if (X(b) - X(a) > 28 && placedZ.every((p) => Math.abs(p - xm) > 34)) {
           placedZ.push(xm);
-          T(xm, (by0 + by1) / 2 + 3.5, lbl, { size: 9, weight: 700, fill: DK.redText, anchor: 'middle' });
+          T(xm, (by0 + by1) / 2 + 3.5, tr(lbl), { size: 9, weight: 700, fill: DK.redText, anchor: 'middle' });
         }
       }
       if (r.chan) {
@@ -457,17 +516,17 @@
           }
         }
       }
-      if (!r.chan && !r.primary) T((x0 + x1) / 2, (by0 + by1) / 2 + 4, '無對應頻道', { size: 10, fill: DK.muted, anchor: 'middle' });
+      if (!r.chan && !r.primary) T((x0 + x1) / 2, (by0 + by1) / 2 + 4, tr('無對應頻道'), { size: 10, fill: DK.muted, anchor: 'middle' });
     });
     const H = rows.length * RH;
-    return `<svg viewBox="0 -2 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="頻譜示意圖" font-family="inherit">${parts.join('')}</svg>`;
+    return `<svg viewBox="0 -2 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(tr('頻譜示意圖'))}" font-family="inherit">${parts.join('')}</svg>`;
   }
 
   function curveSVG(r) {
     const W = readoutWidth(), H = 232;
     const L = 46, Rm = 8, T0 = 44, B = 24;
     const x0 = L, x1 = W - Rm, y0 = T0, y1 = H - B;
-    const acc = getComputedStyle(document.documentElement).getPropertyValue('--accent-on-dark').trim() || '#6CB8DA';
+    const acc = DK.acc;
     const [xmin, xmax] = r.xrange;
     const ys = r.series.flatMap((s) => s.ys).concat(r.point ? [r.point[1]] : [], r.hline ? [r.hline[0]] : []);
     let ymin = Math.min(...ys), ymax = Math.max(...ys);
@@ -480,7 +539,7 @@
       : (x) => x0 + (x - xmin) / (xmax - xmin) * (x1 - x0);
     const Y = (y) => y1 - (y - ymin) / (ymax - ymin) * (y1 - y0);
     const p = [];
-    const txt = (x, y, s, o = {}) => p.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${o.size || 10}" font-weight="${o.weight || 400}" fill="${o.fill || DK.muted}" text-anchor="${o.anchor || 'start'}">${esc(s)}</text>`);
+    const txt = (x, y, s, o = {}) => p.push(`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${o.size || 10}" font-weight="${o.weight || 400}" fill="${o.fill || DK.muted}" text-anchor="${o.anchor || 'start'}">${esc(tr(s))}</text>`);
 
     txt(0, 13, r.title, { size: 12, weight: 600, fill: DK.text });
     for (let y = ymin; y <= ymax + 1e-9; y += step) {
@@ -512,7 +571,7 @@
     if (r.point) {
       const [px, py, pl] = r.point;
       if (px >= xmin && px <= xmax) {
-        p.push(`<circle cx="${X(px).toFixed(1)}" cy="${Y(py).toFixed(1)}" r="5" fill="${acc}" stroke="#fff" stroke-width="2"/>`);
+        p.push(`<circle cx="${X(px).toFixed(1)}" cy="${Y(py).toFixed(1)}" r="5" fill="${acc}" stroke="${getComputedStyle(document.documentElement).getPropertyValue('--p-bg').trim()}" stroke-width="2"/>`);
         const right = X(px) > (x0 + x1) / 2;
         txt(X(px) + (right ? -9 : 9), Y(py) - 8, pl, { anchor: right ? 'end' : 'start', fill: DK.text, weight: 700, size: 12 });
       }
@@ -522,16 +581,16 @@
     for (const [name, kind] of r.legend || []) {
       p.push(`<line x1="${lx}" y1="27" x2="${lx + 16}" y2="27" stroke="${kind === 'main' ? acc : DK.other}" stroke-width="${kind === 'main' ? 3 : 1.5}"/>`);
       txt(lx + 21, 30.5, name, { size: 10 });
-      lx += 21 + [...name].reduce((w, ch) => w + (ch.charCodeAt(0) > 255 ? 10 : 6), 0) + 16;
+      lx += 21 + [...tr(name)].reduce((w, ch) => w + (ch.charCodeAt(0) > 255 ? 10 : 6), 0) + 16;
     }
-    return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(r.title)}" font-family="inherit">${p.join('')}</svg>`;
+    return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(tr(r.title))}" font-family="inherit">${p.join('')}</svg>`;
   }
 
   // ============================================================ 底部面板
   let sheetOpen = false;
   function openSheet(title, note, body) {
-    $('sheetTitle').textContent = title;
-    $('sheetNote').textContent = note || '';
+    $('sheetTitle').textContent = tr(title);
+    $('sheetNote').textContent = tr(note || '');
     $('sheetNote').hidden = !note;
     $('sheetBody').replaceChildren(body);
     $('backdrop').hidden = false; $('sheet').hidden = false;
@@ -593,7 +652,7 @@
   let toastTimer = null;
   function toast(text) {
     const t = $('toast');
-    t.textContent = text;
+    t.textContent = tr(text);
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
@@ -601,7 +660,7 @@
 
   async function share() {
     if (!lastOut) return;
-    const text = R.plainText(lastOut.title, lastOut.out);
+    const text = R.plainText(lastOut.title, lastOut.out).split('\n').map(tr).join('\n');
     if (navigator.share) {
       try { await navigator.share({ title: 'RF Band Calculator', text }); return; }
       catch (e) { if (e && e.name === 'AbortError') return; }
@@ -634,6 +693,30 @@
     }).catch(() => { /* file:// 或不支援時略過 */ });
   }
 
+  // ============================================================ 語言切換
+  /** 套用靜態文字（HTML 內標記 data-i18n 的元素） */
+  function applyLangStatic() {
+    document.documentElement.lang = lang === 'en' ? 'en' : 'zh-Hant';
+    $('btnLang').textContent = lang === 'en' ? '中' : 'EN';
+    $('btnLang').setAttribute('aria-label', lang === 'en' ? '切換為中文' : 'Switch to English');
+    document.querySelectorAll('[data-i18n]').forEach((n) => {
+      if (!n.dataset.zh) n.dataset.zh = n.textContent;
+      n.textContent = tr(n.dataset.zh);
+    });
+    document.querySelectorAll('[data-i18n-aria]').forEach((n) => {
+      if (!n.dataset.zhAria) n.dataset.zhAria = n.getAttribute('aria-label');
+      n.setAttribute('aria-label', tr(n.dataset.zhAria));
+    });
+  }
+  function setLang(v) {
+    lang = v;
+    try { localStorage.setItem('rfcalc.lang', v); } catch (e) { /* 忽略 */ }
+    closeSheet();
+    $('toast').classList.remove('show');
+    $('toast').textContent = '';
+    renderTool();
+  }
+
   // ============================================================ 啟動
   document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
     if (S.tool === t.dataset.tool) return;
@@ -643,6 +726,8 @@
     window.scrollTo({ top: 0 });
   }));
   $('btnTable').addEventListener('click', openTable);
+  $('btnLang').addEventListener('click', () => setLang(lang === 'en' ? 'zh' : 'en'));
+  darkMQ.addEventListener('change', () => renderTool());
   $('btnShare').addEventListener('click', share);
   $('btnAbout').addEventListener('click', openAbout);
   $('sheetClose').addEventListener('click', closeSheet);

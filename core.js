@@ -165,8 +165,136 @@
       if (b.ul && b.duplex !== 'TDD') p.push(`UL ${fmt(b.ul[0])}–${fmt(b.ul[1])}`);
       return p.join(' ／ ') + ` MHz · ${b.duplex}`;
     },
-    compute(b, bw, n, scs) { return b.tech === 'LTE' ? lteCompute(b, bw, n) : nrCompute(b, bw, n, scs); },
+    /** 頻段中心頻率最接近的頻點（M） */
+    midCh(b, bw, scs) {
+      const [lo, hi] = Cell.primary(b)[1];
+      return Cell.snap(b, bw, scs, Cell.freqToCh(b, (lo + hi) / 2, scs));
+    },
+    /** 對應上行頻點（FDD）；超出 UL 頻段時回傳 null */
+    ulOf(b, bw, n) {
+      if (b.duplex !== 'FDD') return null;
+      const [ulo, uhi] = b.ul;
+      let nUl, fUl;
+      if (b.tech === 'LTE') { nUl = n - b.nDL + b.nUL; fUl = ulo + (nUl - b.nUL) / 10.0; }
+      else { fUl = nrArfcnToFreq(n) - (b.dl[0] - ulo); nUl = roundI(nrArfcnFloat(fUl)); }
+      if (!(ulo - 1e-9 <= fUl - bw / 2 && fUl + bw / 2 <= uhi + 1e-9)) return null;
+      return { n: nUl, f: fUl };
+    },
+    /** L / M / H 測試頻點（TS 36.508 / 38.508-1 原則：下緣 + BW/2、頻段中心、上緣 − BW/2） */
+    lmh(b, bw, scs) {
+      const vr = Cell.validRange(b, bw, scs);
+      if (!vr) return null;
+      const pts = { L: vr[0], M: Cell.midCh(b, bw, scs), H: vr[1] };
+      const out = {};
+      for (const k of ['L', 'M', 'H']) {
+        const n = pts[k];
+        out[k] = { n, f: Cell.chToFreq(b, n), ul: Cell.ulOf(b, bw, n) };
+      }
+      return out;
+    },
+    compute(b, bw, n, scs) {
+      const o = b.tech === 'LTE' ? lteCompute(b, bw, n) : nrCompute(b, bw, n, scs);
+      addLmh(o, b, bw, scs);
+      if (b.tech === 'LTE') lteSens(o, b, bw, n); else nrSens(o, b, bw, n, scs);
+      return o;
+    },
   };
+
+  function addLmh(o, b, bw, scs) {
+    const p = Cell.lmh(b, bw, scs);
+    const chName = Cell.chName(b.tech);
+    const tag = b.duplex === 'TDD' ? '' : `${Cell.primary(b)[0]} `;
+    o.rows.push([`L / M / H 測試頻點（${fmt(bw)} MHz）`, null]);
+    if (!p) { o.rows.push(['結果', '此頻寬超出頻段寬度，無可用頻點']); return; }
+    const names = { L: 'L（Low）', M: 'M（Mid）', H: 'H（High）' };
+    for (const k of ['L', 'M', 'H']) {
+      const x = p[k];
+      let v = `${tag}${chName} ${x.n}（${fmt(x.f)} MHz）`;
+      if (b.duplex === 'FDD') v += x.ul ? `　UL ${chName} ${x.ul.n}（${fmt(x.ul.f)} MHz）` : '　UL —';
+      o.rows.push([names[k], v]);
+    }
+    o.rows.push(['計算原則', '下緣 + BW/2、頻段中心、上緣 − BW/2（對齊通道柵格）']);
+    // 頻譜上標示 L / M / H
+    if (o.spec[0]) o.spec[0].marks = ['L', 'M', 'H'].map((k) => [p[k].f, k]);
+    if (o.spec[1] && b.duplex === 'FDD') o.spec[1].marks = ['L', 'M', 'H'].filter((k) => p[k].ul).map((k) => [p[k].ul.f, k]);
+  }
+
+  // ---------------------------------------------------------------- 靈敏度 RB 設定
+  // TS 36.101 Table 7.3.1-2「Uplink configuration for reference sensitivity」
+  // 僅列出非全 RB 的項目；未列出者為全 RB。索引：BW (MHz) → UL RB 數
+  const LTE_SENS_UL = {
+    2: { 15: 50, 20: 50 }, 3: { 15: 50, 20: 50 }, 5: { 10: 25 }, 7: { 20: 75 }, 8: { 10: 25 },
+    12: { 5: 20, 10: 20 }, 13: { 5: 20, 10: 20 }, 17: { 5: 20, 10: 20 },
+    20: { 10: 20, 15: 20, 20: 20 }, 25: { 15: 50, 20: 50 }, 26: { 10: 25, 15: 25 }, 28: { 10: 25, 15: 25, 20: 25 },
+    // 以下頻段數值待核對
+    6: { 10: 25 }, 9: { 15: 50, 20: 50 }, 11: { 10: 25 }, 14: { 5: 15, 10: 15 }, 18: { 10: 25, 15: 25 },
+    19: { 10: 25, 15: 25 }, 21: { 10: 25, 15: 25 }, 22: { 15: 50, 20: 50 }, 27: { 10: 25 }, 30: { 10: 25 },
+    31: { 3: 5, 5: 5 }, 68: { 10: 25, 15: 25 }, 70: { 15: 50, 20: 50 }, 71: { 10: 25, 15: 20, 20: 20 },
+    85: { 5: 20, 10: 20 }, 87: { 3: 5, 5: 5 }, 88: { 3: 5, 5: 5 },
+  };
+  const LTE_SENS_VERIFY = new Set([6, 9, 11, 14, 18, 19, 21, 22, 24, 27, 30, 31, 68, 70, 71, 72, 73, 74, 85, 87, 88]);
+
+  /** UL 配置在頻道內的頻率範圍 */
+  function rbSpan(fc, nrbTotal, start, len, rbKHz) {
+    const lo = fc - nrbTotal * rbKHz / 2000;
+    return [lo + start * rbKHz / 1000, lo + (start + len) * rbKHz / 1000];
+  }
+
+  function lteSens(o, b, bw, n) {
+    const nrb = LTE_NRB[String(bw)];
+    o.rows.push([`靈敏度測試 RB 設定（REFSENS，${fmt(bw)} MHz）`, null]);
+    if (b.duplex === 'SDL' || b.num === 46) {
+      o.rows.push(['依據', 'TS 36.101 §7.3.1']);
+      o.rows.push(['DL 配置', `全部 ${nrb} RB（參考量測通道 RMC，QPSK）`]);
+      o.rows.push(['UL 配置', '此頻段無上行，需於 CA 組合中測試']);
+      return;
+    }
+    const len = (LTE_SENS_UL[b.num] || {})[bw] || nrb;
+    const reduced = len < nrb;
+    let start = 0;
+    if (reduced && b.duplex === 'FDD') start = b.ul[0] > b.dl[0] ? 0 : nrb - len;
+    o.rows.push(['依據', 'TS 36.101 §7.3.1，Table 7.3.1-2']);
+    o.rows.push(['DL 配置', `全部 ${nrb} RB（參考量測通道 RMC，QPSK）`]);
+    o.rows.push(['UL 配置', `${len} RB（QPSK）` + (reduced ? '，非全 RB' : '，全 RB')]);
+    o.rows.push(['UL RB 起始位置', `RB_start = ${start}` + (reduced ? (start === 0 ? '（靠頻道下緣，最接近 DL 頻段）' : '（靠頻道上緣，最接近 DL 頻段）') : '')]);
+    o.rows.push(['UL 發射功率', '最大輸出功率（P_CMAX）']);
+    const ul = b.duplex === 'FDD' ? Cell.ulOf(b, bw, n) : { f: Cell.chToFreq(b, n) };
+    if (ul) {
+      const [a, z] = rbSpan(ul.f, nrb, start, len, 180);
+      o.rows.push(['UL 佔用頻率（目前頻點）', `${fmt(a)} – ${fmt(z)} MHz`]);
+    }
+    if (LTE_SENS_VERIFY.has(b.num)) {
+      o.rows.push(['備註', '此頻段數值請以最新版 TS 36.101 核對']);
+      o.warns.push('此頻段的靈敏度 RB 設定數值待核對，請以最新版 TS 36.101 Table 7.3.1-2 為準。');
+    }
+  }
+
+  function nrSens(o, b, bw, n, scs) {
+    o.rows.push([`靈敏度測試 RB 設定（REFSENS，${bw} MHz @ SCS ${scs} kHz）`, null]);
+    if (b.fr === 'FR2') {
+      o.rows.push(['依據', 'TS 38.101-2 §7.3']);
+      o.rows.push(['量測方式', 'FR2 參考靈敏度為 OTA 量測（EIS）']);
+      return;
+    }
+    const nrb = NR_NRB[b.fr][String(scs)][String(bw)];
+    o.rows.push(['依據', 'TS 38.101-1 §7.3.2，Table 7.3.2-3']);
+    o.rows.push(['DL 配置', `全部 ${nrb} RB（參考量測通道，QPSK）`]);
+    if (b.duplex === 'SDL') { o.rows.push(['UL 配置', '此頻段無上行，需於 CA 組合中測試']); return; }
+    if (b.duplex === 'SUL') { o.rows.push(['UL 配置', '補充上行頻段，靈敏度於搭配的 DL 頻段測試']); return; }
+    if (b.duplex === 'TDD') {
+      o.rows.push(['UL 配置', `${nrb} RB（Full，QPSK）`]);
+      o.rows.push(['UL RB 起始位置', 'RB_start = 0']);
+      o.rows.push(['UL 發射功率', '最大輸出功率（P_CMAX）']);
+      const [a, z] = rbSpan(nrArfcnToFreq(n), nrb, 0, nrb, 12 * scs);
+      o.rows.push(['UL 佔用頻率（目前頻點）', `${fmt(a)} – ${fmt(z)} MHz`]);
+      o.rows.push(['備註', '請以最新版 TS 38.101-1 核對']);
+      return;
+    }
+    const rbStart = b.ul[0] > b.dl[0] ? '0（靠頻道下緣）' : 'N_RB − L_CRB（靠頻道上緣）';
+    o.rows.push(['UL 配置', '依 Table 7.3.2-3；部分頻寬為非全 RB（本工具未內建此頻段數值）']);
+    o.rows.push(['UL RB 起始位置', `非全 RB 時配置於最接近 DL 頻段的一側：RB_start = ${rbStart}`]);
+    o.rows.push(['UL 發射功率', '最大輸出功率（P_CMAX）']);
+  }
 
   function lteCompute(b, bw, n) {
     const rows = [], spec = [], warns = [];
@@ -447,7 +575,34 @@
       }
       spec.push({ label: `Wi-Fi ${band}`, lo, hi, chan: [fc - bw / 2, fc + bw / 2], center: fc,
         primary: [fp - half, fp + half], ticks, slots: WiFi.slots(band) });
-      return { rows, spec, warns };
+      const out = { rows, spec, warns };
+      WiFi.addLmh(out, band, bwLabel);
+      return out;
+    },
+    /** 該頻段、該頻寬下的 L / M / H 通道區塊（全頻段範圍；不含僅 802.11b 的通道 14） */
+    lmh(band, bwLabel) {
+      const blocks = new Map();
+      for (const c of WIFI_BANDS[band].channels) {
+        if (band === '2.4 GHz' && c === 14) continue;
+        const r = WiFi.block(band, c, bwLabel);
+        if (typeof r === 'object' && !blocks.has(r.centerCh)) blocks.set(r.centerCh, r);
+      }
+      const list = [...blocks.values()].sort((a, b) => a.centerCh - b.centerCh);
+      if (!list.length) return null;
+      return { L: list[0], M: list[Math.floor((list.length - 1) / 2)], H: list[list.length - 1] };
+    },
+    addLmh(out, band, bwLabel) {
+      const p = WiFi.lmh(band, bwLabel);
+      out.rows.push([`L / M / H 測試通道（${bwLabel}）`, null]);
+      if (!p) { out.rows.push(['結果', '無可用通道']); return; }
+      const names = { L: 'L（Low）', M: 'M（Mid）', H: 'H（High）' };
+      for (const k of ['L', 'M', 'H']) {
+        const x = p[k];
+        const prim = x.members.length > 1 ? `，主通道 ${x.members[0]}–${x.members[x.members.length - 1]}` : '';
+        out.rows.push([names[k], `通道 ${x.centerCh}（${fmt(x.fc)} MHz，${fmt(x.fc - x.bw / 2)} – ${fmt(x.fc + x.bw / 2)} MHz${prim}）`]);
+      }
+      out.rows.push(['計算原則', '頻段內最低、中間、最高的可用通道區塊；實際依各國開放通道選擇']);
+      if (out.spec[0]) out.spec[0].marks = ['L', 'M', 'H'].map((k) => [p[k].fc, k]);
     },
   };
 
