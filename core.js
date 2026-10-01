@@ -180,6 +180,22 @@
       if (!(ulo - 1e-9 <= fUl - bw / 2 && fUl + bw / 2 <= uhi + 1e-9)) return null;
       return { n: nUl, f: fUl };
     },
+    /** 由 UL 通道號反推 DL 通道號（FDD）；超出範圍時回傳錯誤訊息字串 */
+    dlFromUlCh(b, nUl, scs) {
+      const [ulo, uhi] = b.ul;
+      if (b.tech === 'LTE') {
+        const top = b.nUL + roundI((uhi - ulo) * 10) - 1;
+        if (nUl < b.nUL || nUl > top) return `UL EARFCN ${nUl} 不在此頻段範圍 ${b.nUL} – ${top}。`;
+        return nUl - b.nUL + b.nDL;
+      }
+      return Cell.dlFromUlFreq(b, nrArfcnToFreq(nUl), scs);
+    },
+    /** 由 UL 頻率反推 DL 通道號（FDD）；超出範圍時回傳錯誤訊息字串 */
+    dlFromUlFreq(b, fUl, scs) {
+      const [ulo, uhi] = b.ul;
+      if (fUl < ulo - 1e-9 || fUl > uhi + 1e-9) return `UL ${fmt(fUl)} MHz 不在此頻段 ${fmt(ulo)} – ${fmt(uhi)} MHz 內。`;
+      return Cell.freqToCh(b, fUl + (b.dl[0] - ulo), scs);
+    },
     /** L / M / H 測試頻點（TS 36.508 / 38.508-1 原則：下緣 + BW/2、頻段中心、上緣 − BW/2） */
     lmh(b, bw, scs) {
       const vr = Cell.validRange(b, bw, scs);
@@ -342,7 +358,8 @@
     rows.push([`${dlTag}中心頻率`, `${fmt(f)} MHz`]);
     rows.push([`${dlTag}頻道範圍`, `${fmt(f - bw / 2)} – ${fmt(f + bw / 2)} MHz`]);
     rows.push(['計算式', `${fmt(lo)} + 0.1 × (${n} − ${b.nDL}) = ${fmt(f)} MHz`]);
-    spec.push({ label: isTdd ? 'DL / UL' : 'DL 下行', lo, hi, chan: [f - bw / 2, f + bw / 2], center: f });
+    spec.push({ label: isTdd ? 'DL / UL' : 'DL 下行', lo, hi, chan: [f - bw / 2, f + bw / 2], center: f,
+      centerText: `${fmt(f)} MHz · EARFCN ${n}` });
 
     if (b.duplex === 'FDD') {
       const [ulo, uhi] = b.ul;
@@ -352,7 +369,8 @@
         rows.push(['UL EARFCN', String(nUl)]);
         rows.push(['UL 中心頻率', `${fmt(fUl)} MHz`]);
         rows.push(['UL 頻道範圍', `${fmt(fUl - bw / 2)} – ${fmt(fUl + bw / 2)} MHz`]);
-        spec.push({ label: 'UL 上行', lo: ulo, hi: uhi, chan: [fUl - bw / 2, fUl + bw / 2], center: fUl });
+        spec.push({ label: 'UL 上行', lo: ulo, hi: uhi, chan: [fUl - bw / 2, fUl + bw / 2], center: fUl,
+          centerText: `${fmt(fUl)} MHz · EARFCN ${nUl}` });
       } else {
         rows.push(['UL EARFCN', '—（此 DL 頻點無對應 UL，僅能作為 CA 下行）']);
         spec.push({ label: 'UL 上行', lo: ulo, hi: uhi });
@@ -418,7 +436,7 @@
     rows.push([`${tag}頻道範圍`, `${fmt(f - bw / 2)} – ${fmt(f + bw / 2)} MHz`]);
     rows.push(['計算式', `${fmt(fOff, 2)} + ${String(dfg / 1000)} × (${n} − ${nOff}) = ${fmt(f)} MHz`]);
     const label = { TDD: 'DL / UL', SUL: 'UL (SUL)' }[b.duplex] || 'DL 下行';
-    spec.push({ label, lo, hi, chan: [f - bw / 2, f + bw / 2], center: f });
+    spec.push({ label, lo, hi, chan: [f - bw / 2, f + bw / 2], center: f, centerText: `${fmt(f)} MHz · NR-ARFCN ${n}` });
 
     if (b.duplex === 'FDD') {
       const [ulo, uhi] = b.ul;
@@ -428,7 +446,8 @@
         rows.push(['UL NR-ARFCN', String(nUl)]);
         rows.push(['UL 中心頻率', `${fmt(fUl)} MHz`]);
         rows.push(['UL 頻道範圍', `${fmt(fUl - bw / 2)} – ${fmt(fUl + bw / 2)} MHz`]);
-        spec.push({ label: 'UL 上行', lo: ulo, hi: uhi, chan: [fUl - bw / 2, fUl + bw / 2], center: fUl });
+        spec.push({ label: 'UL 上行', lo: ulo, hi: uhi, chan: [fUl - bw / 2, fUl + bw / 2], center: fUl,
+          centerText: `${fmt(fUl)} MHz · NR-ARFCN ${nUl}` });
       } else {
         rows.push(['UL NR-ARFCN', '—（此 DL 頻點無對應 UL，僅能作為 CA 下行）']);
         spec.push({ label: 'UL 上行', lo: ulo, hi: uhi });
@@ -574,6 +593,7 @@
         if (ticksAll || kind !== 'normal') ticks.push([WiFi.freq(band, c), String(c), kind]);
       }
       spec.push({ label: `Wi-Fi ${band}`, lo, hi, chan: [fc - bw / 2, fc + bw / 2], center: fc,
+        centerText: `${fmt(fc)} MHz · CH ${blk.centerCh}`,
         primary: [fp - half, fp + half], ticks, slots: WiFi.slots(band) });
       const out = { rows, spec, warns };
       WiFi.addLmh(out, band, bwLabel);
@@ -737,6 +757,8 @@
   const COAX_FMAX = 6.0;
   const COAX_REF = [700, 900, 1575.42, 1800, 2400, 3500, 5150, 5800, 6000];
   const LEN_UNITS = { mm: 0.001, cm: 0.01, m: 1.0 };
+  const COAX_CONN = { 0.81: 'MHF4、W.FL 等超小型連接器', 1.13: 'U.FL、MHF I、MHF4', 1.37: 'U.FL、MHF I' };
+  const COAX_REFS = 'I-PEX MHF 系列、Hirose U.FL / W.FL 系列線材組件，以及 Amphenol RF、Taoglas 等廠商的 0.81 / 1.13 / 1.37 mm 線材規格書';
 
   const Cable = {
     cables: COAX, customName: COAX_CUSTOM, lenUnits: LEN_UNITS,
@@ -765,6 +787,17 @@
       rows.push(['參考衰減', `${fmt(a1)} dB/m @ 1 GHz ／ ${fmt(a6)} dB/m @ 6 GHz`]);
       rows.push(['損耗模型', `α(f) = ${fixed(k1, 4)}·√f + ${fixed(k2, 4)}·f　（dB/m，f 單位 GHz）`]);
       rows.push(['典型額定頻率', `DC – ${fmt(COAX_FMAX)} GHz`]);
+
+      rows.push(['資料來源', null]);
+      if (known) {
+        rows.push(['內建數值', '業界常見典型值（彙整自微型同軸線廠商規格的典型範圍），非單一廠商規格']);
+        rows.push(['常見搭配連接器', COAX_CONN[known.dia] + '（實際以連接器規格為準）']);
+      } else {
+        rows.push(['內建數值', '使用者自訂（規格書數值）']);
+      }
+      rows.push(['特性阻抗', '50 Ω']);
+      rows.push(['可參考規格', COAX_REFS]);
+      rows.push(['建議', '請以實際採購線材的規格書數值為準，可選「自訂」輸入']);
 
       rows.push(['損耗計算', null]);
       rows.push(['頻率', `${fmt(fMHz, 3)} MHz`]);
@@ -934,7 +967,7 @@
         cols: ['線材', '外徑 (mm)'].concat(fq.map((f) => `${fmt(f / 1000, 4)} GHz`)),
         rows: COAX.map((c) => { const [k1, k2] = Cable.coeffs(c.a1, c.a6);
           return [c.name, [c.name, String(c.dia)].concat(fq.map((f) => fixed(Cable.alpha(k1, k2, f), 2)))]; }),
-        note: '數值單位：dB/m（典型值）。',
+        note: '數值單位：dB/m（典型值）。內建數值為業界常見典型值，非單一廠商規格；請以實際線材規格書為準。',
       };
     },
     fspl() {

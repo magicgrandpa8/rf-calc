@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.4.0';
+  const APP_VERSION = '1.5.0';
   const CACHE_NAME = 'rfcalc-' + APP_VERSION;
   const R = window.RFCore;
   const { fmt } = R;
@@ -166,7 +166,6 @@
 
   function buildCellInputs(box) {
     const { tech, st, b } = cellState();
-    const chName = tech === 'LTE' ? 'DL EARFCN' : 'NR-ARFCN';
     box.append(seg([['LTE', '4G LTE'], ['NR', '5G NR']], tech, (v) => { S.tech = v; message = null; renderTool(); }));
 
     const bands = R.Cell.bands(tech);
@@ -194,17 +193,55 @@
     }, '通道頻寬')));
 
     const step = R.Cell.step(b, st.scs);
-    const chIn = numInput(String(st.ch), { mode: 'numeric', aria: chName, width: 112, oncommit: (val) => {
-      const v = parseNum(val);
-      if (Number.isNaN(v)) { message = { kind: 'err', text: `「${val}」不是有效的 ${R.Cell.chName(tech)}。` }; return renderTool(); }
-      const n = Math.trunc(v);
+    const chName = R.Cell.chName(tech);
+    const fdd = b.duplex === 'FDD';
+    const err = (text) => { message = { kind: 'err', text }; renderTool(); };
+    /** 以 DL 通道號設定（共用：DL / UL 輸入最後都換算為 DL） */
+    const applyDl = (n, info) => {
       const [lo, hi] = R.Cell.bandChRange(b, st.scs);
-      if (n < lo || n > hi) { message = { kind: 'err', text: `${R.Cell.chName(tech)} ${n} 不在此頻段範圍 ${lo} – ${hi}。` }; return renderTool(); }
+      if (n < lo || n > hi) return err(`${chName} ${n} 不在此頻段範圍 ${lo} – ${hi}。`);
       const a = R.Cell.align(b, st.scs, n);
       st.ch = a;
-      message = a !== n ? { kind: 'warn', text: `已對齊通道柵格：${n} → ${a}` } : null;
+      message = a !== n ? { kind: 'warn', text: `已對齊通道柵格：${n} → ${a}` } : info || null;
       renderTool();
-    } });
+    };
+    const num = (val, what) => { const v = parseNum(val); if (Number.isNaN(v)) { err(`「${val}」不是有效的${what}。`); return null; } return v; };
+    const onDlCh = (val) => { const v = num(val, ` ${chName}`); if (v !== null) applyDl(Math.trunc(v)); };
+    const onDlFreq = (val) => {
+      const v = num(val, '頻率'); if (v === null) return;
+      const [plo, phi] = R.Cell.primary(b)[1];
+      if (v < plo || v > phi) return err(`${fmt(v)} MHz 不在此頻段 ${fmt(plo)} – ${fmt(phi)} MHz 內。`);
+      const [lo, hi] = R.Cell.bandChRange(b, st.scs);
+      const n = Math.min(Math.max(R.Cell.freqToCh(b, v, st.scs), lo), hi);
+      const f2 = R.Cell.chToFreq(b, n);
+      applyDl(n, Math.abs(f2 - v) > 1e-6 ? { kind: 'info', text: `已換算至最近頻點 ${fmt(f2)} MHz` } : null);
+    };
+    const onUlCh = (val) => {
+      const v = num(val, ` UL ${chName}`); if (v === null) return;
+      const r = R.Cell.dlFromUlCh(b, Math.trunc(v), st.scs);
+      if (typeof r === 'string') return err(r);
+      applyDl(r);
+    };
+    const onUlFreq = (val) => {
+      const v = num(val, '頻率'); if (v === null) return;
+      const r = R.Cell.dlFromUlFreq(b, v, st.scs);
+      if (typeof r === 'string') return err(r);
+      applyDl(r);
+    };
+
+    const f = R.Cell.chToFreq(b, st.ch);
+    const ul = fdd ? R.Cell.ulOf(b, st.bw, st.ch) : null;
+    const head = fdd ? ['DL', 'UL'] : [{ TDD: 'DL / UL', SUL: 'UL', SDL: 'DL' }[b.duplex] || 'DL'];
+    const grid = h('div', { class: 'dual' + (fdd ? '' : ' single') }, h('span'), head.map((t) => h('span', { class: 'dual-head', text: t })));
+    grid.append(h('label', {}, chName, h('small', { text: `步進 ${step}` })));
+    grid.append(numInput(String(st.ch), { mode: 'numeric', aria: fdd ? `DL ${chName}` : chName, oncommit: onDlCh }));
+    if (fdd) grid.append(numInput(ul ? String(ul.n) : '—', { mode: 'numeric', aria: `UL ${chName}`, disabled: !ul, oncommit: onUlCh }));
+    grid.append(h('label', {}, '中心頻率', h('small', { text: 'MHz' })));
+    grid.append(numInput(fmt(f), { aria: fdd ? 'DL 中心頻率' : '中心頻率', oncommit: onDlFreq }));
+    if (fdd) grid.append(numInput(ul ? fmt(ul.f) : '—', { aria: 'UL 中心頻率', disabled: !ul, oncommit: onUlFreq }));
+    box.append(h('div', { class: 'field' }, grid));
+    if (fdd && !ul) box.append(h('div', { class: 'note', text: '此 DL 頻點無對應 UL（僅能作為 CA 下行）。' }));
+
     const stepper = (d) => h('button', { type: 'button', class: 'stepbtn', 'aria-label': d > 0 ? '下一個頻點' : '上一個頻點',
       text: d > 0 ? '+' : '−', onclick: () => {
         const [lo, hi] = R.Cell.bandChRange(b, st.scs);
@@ -212,21 +249,7 @@
         message = null;
         renderTool();
       } });
-    box.append(field(chName, `步進 ${step}`, stepper(-1), chIn, stepper(1)));
-
-    const f = R.Cell.chToFreq(b, st.ch);
-    const fIn = numInput(fmt(f), { aria: '中心頻率', width: 112, oncommit: (val) => {
-      const v = parseNum(val);
-      if (Number.isNaN(v)) { message = { kind: 'err', text: `「${val}」不是有效的頻率。` }; return renderTool(); }
-      const [plo, phi] = R.Cell.primary(b)[1];
-      if (v < plo || v > phi) { message = { kind: 'err', text: `${fmt(v)} MHz 不在此頻段 ${fmt(plo)} – ${fmt(phi)} MHz 內。` }; return renderTool(); }
-      const [lo, hi] = R.Cell.bandChRange(b, st.scs);
-      st.ch = Math.min(Math.max(R.Cell.freqToCh(b, v, st.scs), lo), hi);
-      const f2 = R.Cell.chToFreq(b, st.ch);
-      message = Math.abs(f2 - v) > 1e-6 ? { kind: 'info', text: `已換算至最近頻點 ${fmt(f2)} MHz` } : null;
-      renderTool();
-    } });
-    box.append(field('中心頻率', null, fIn, h('span', { class: 'unit', text: 'MHz' })));
+    box.append(field('微調頻點', `步進 ${step}`, stepper(-1), stepper(1)));
 
     const p = R.Cell.lmh(b, st.bw, st.scs);
     if (p) box.append(field('測試頻點', 'L / M / H', lmhButtons((k) => p[k].n === st.ch, (k) => { st.ch = p[k].n; message = null; renderTool(); })));
@@ -260,9 +283,20 @@
         w.ch = c[Math.min(Math.max(i + d, 0), c.length - 1)];
         renderTool();
       } });
-    box.append(field('主通道', null, stepper(-1),
+    box.append(field('主通道', 'UL / DL 同頻（TDD）', stepper(-1),
       select(info.channels.map((c) => [c, `${c}  (${fmt(R.WiFi.freq(w.band, c))})`]), w.ch, (v) => { w.ch = Number(v); renderTool(); }, '主通道'),
       stepper(1)));
+    const fIn = numInput(fmt(R.WiFi.freq(w.band, w.ch)), { aria: '中心頻率', width: 112, oncommit: (val) => {
+      const v = parseNum(val);
+      if (Number.isNaN(v)) { message = { kind: 'err', text: `「${val}」不是有效的頻率。` }; return renderTool(); }
+      let best = info.channels[0];
+      for (const c of info.channels) if (Math.abs(R.WiFi.freq(w.band, c) - v) < Math.abs(R.WiFi.freq(w.band, best) - v)) best = c;
+      const fb = R.WiFi.freq(w.band, best);
+      w.ch = best;
+      message = Math.abs(fb - v) > 1e-6 ? { kind: 'info', text: `已換算至最近通道 CH ${best}（${fmt(fb)} MHz）` } : null;
+      renderTool();
+    } });
+    box.append(field('中心頻率', 'UL / DL 同頻（主通道）', fIn, h('span', { class: 'unit', text: 'MHz' })));
     box.append(field('通道頻寬', null, select(info.bws.map((x) => [x, x]), w.bw, (v) => { w.bw = v; renderTool(); }, '通道頻寬')));
     const p = R.WiFi.lmh(w.band, w.bw);
     if (p) {
@@ -363,6 +397,9 @@
   function renderTool() {
     applyTheme(themeKey());
     $('title').textContent = S.tool === 'CELL' ? (S.tech === 'LTE' ? '4G LTE' : '5G NR') : TITLES[S.tool];
+    const rt = { CABLE: '損耗曲線', FSPL: '接收功率曲線' }[S.tool] || '頻譜示意';
+    $('readoutTitle').dataset.zh = rt;
+    $('readoutBox').open = !S.fold[`${S.tool}|__readout`];
     applyLangStatic();
     document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tool === S.tool)));
     const box = $('inputs');
@@ -407,29 +444,61 @@
       msg = { kind: /無法|不在/.test(w) ? 'err' : 'warn', text: w };
     } else if (message) msg = message;
     if (msg) { m.className = 'msg ' + msg.kind; m.textContent = (msg.kind === 'err' ? '✕ ' : msg.kind === 'warn' ? '⚠ ' : '') + tr(msg.text); m.hidden = false; }
-    else m.hidden = true;
+    else { m.hidden = true; m.textContent = ''; }
 
     if (out) {
+      out = Object.assign({}, out, { rows: visibleRows(out.rows) });
+      lastOut = { out, title };
       renderReadout(out.spec);
       renderResults(out.rows);
     }
     saveState();
   }
 
+  // 行動網路 / Wi-Fi 不顯示的區段（資訊已整合至輸入區與頻譜圖）
+  const HIDDEN = { CELL: ['頻道計算', 'L / M / H'], WIFI: ['L / M / H'] };
+  function visibleRows(rows) {
+    const hide = HIDDEN[S.tool] || [];
+    if (!hide.length) return rows;
+    const out = [];
+    let skip = false;
+    for (const r of rows) {
+      if (r[1] === null) skip = hide.some((p) => r[0].startsWith(p));
+      if (!skip) out.push(r);
+    }
+    return out;
+  }
+
+  /** 摺疊狀態：以「分頁 + 區段名稱（去除括號內容）」為鍵，記憶於本機 */
+  if (!S.fold || typeof S.fold !== 'object') S.fold = {};
+  const foldKey = (title) => `${S.tool}|${String(title).replace(/（[^）]*）/g, '').trim()}`;
+
   function renderResults(rows) {
     let html = '';
     let open = false;
     for (const [k, v] of rows) {
       if (v === null) {
-        if (open) html += '</dl></div>';
-        html += `<div class="group"><h2>${esc(tr(k))}</h2><dl>`;
+        if (open) html += '</dl></details>';
+        const key = foldKey(k);
+        html += `<details class="group" data-fold="${esc(key)}"${S.fold[key] ? '' : ' open'}><summary><h2>${esc(tr(k))}</h2></summary><dl>`;
         open = true;
       } else {
         html += `<div class="row"><dt>${esc(tr(k))}</dt><dd>${esc(tr(v))}</dd></div>`;
       }
     }
-    if (open) html += '</dl></div>';
+    if (open) html += '</dl></details>';
     $('results').innerHTML = html;
+  }
+
+  function setAllFolds(collapsed) {
+    document.querySelectorAll('#results details.group').forEach((d) => {
+      S.fold[d.dataset.fold] = collapsed;
+      d.open = !collapsed;
+    });
+    const rk = `${S.tool}|__readout`;
+    S.fold[rk] = collapsed;
+    $('readoutBox').open = !collapsed;
+    saveState();
   }
 
   // ------------------------------------------------------------ 頻譜 / 曲線（SVG）
@@ -445,6 +514,7 @@
 
   function renderReadout(spec) {
     if (!spec || !spec.length) { $('readout').innerHTML = ''; return; }
+    if (!$('readoutBox').open) return;   // 收合時不重繪，展開時再繪製
     panelColors();
     $('readout').innerHTML = spec[0].type === 'curve' ? curveSVG(spec[0]) : spectrumSVG(spec);
   }
@@ -459,8 +529,11 @@
     const RECT = (x, y, w, h, fill, extra = '') => parts.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(w, 0).toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" ${extra}/>`);
     const LINE = (x1, y1, x2, y2, stroke, w = 1) => parts.push(`<line x1="${x1.toFixed(1)}" y1="${y1}" x2="${x2.toFixed(1)}" y2="${y2}" stroke="${stroke}" stroke-width="${w}"/>`);
 
-    rows.forEach((r, i) => {
-      const y = i * RH;
+    let yAcc = 0;
+    rows.forEach((r) => {
+      const y = yAcc;
+      const extra = (r.ticks && r.ticks.length && r.centerText) ? 16 : 0;
+      yAcc += RH + extra;
       const x0 = 0, x1 = W;
       const span = (r.hi - r.lo) || 1;
       const X = (f) => x0 + (Math.min(Math.max(f, r.lo), r.lo + span) - r.lo) / span * (x1 - x0);
@@ -498,10 +571,13 @@
       const ticks = r.ticks || [];
       if (r.center !== undefined && !ticks.length) {
         const xc = X(r.center);
+        const label = r.centerText || fmt(r.center);
+        const half = label.length * 3.3 + 6;                       // 估計文字半寬
+        const xl = Math.min(Math.max(xc, x0 + half), x1 - half);    // 靠邊時往內移，避免被裁切
         LINE(xc, by0 - 6, xc, by1 + 6, acc, 2);
-        T(xc, by1 + 18, fmt(r.center), { fill: acc, weight: 700, anchor: 'middle' });
-        if (Math.abs(xc - x0) > 64) T(x0, by1 + 18, fmt(r.lo), { size: 10, fill: DK.muted });
-        if (Math.abs(x1 - xc) > 64) T(x1, by1 + 18, fmt(r.hi), { size: 10, fill: DK.muted, anchor: 'end' });
+        T(xl, by1 + 18, label, { fill: acc, weight: 700, anchor: 'middle' });
+        if (xl - half - x0 > 34) T(x0, by1 + 18, fmt(r.lo), { size: 10, fill: DK.muted });
+        if (x1 - (xl + half) > 34) T(x1, by1 + 18, fmt(r.hi), { size: 10, fill: DK.muted, anchor: 'end' });
       }
       if (ticks.length) {
         const placed = [];
@@ -516,9 +592,14 @@
           }
         }
       }
+      if (ticks.length && r.centerText && r.center !== undefined) {   // Wi-Fi：刻度下方再顯示中心頻率與通道
+        const half = r.centerText.length * 3.3 + 6;
+        const xl = Math.min(Math.max(X(r.center), x0 + half), x1 - half);
+        T(xl, by1 + 32, r.centerText, { fill: acc, weight: 700, anchor: 'middle' });
+      }
       if (!r.chan && !r.primary) T((x0 + x1) / 2, (by0 + by1) / 2 + 4, tr('無對應頻道'), { size: 10, fill: DK.muted, anchor: 'middle' });
     });
-    const H = rows.length * RH;
+    const H = yAcc;
     return `<svg viewBox="0 -2 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(tr('頻譜示意圖'))}" font-family="inherit">${parts.join('')}</svg>`;
   }
 
@@ -727,6 +808,18 @@
   }));
   $('btnTable').addEventListener('click', openTable);
   $('btnLang').addEventListener('click', () => setLang(lang === 'en' ? 'zh' : 'en'));
+  // 摺疊 / 展開（toggle 事件不冒泡，使用 capture 監聽）
+  $('results').addEventListener('toggle', (e) => {
+    const d = e.target;
+    if (d.dataset && d.dataset.fold) { S.fold[d.dataset.fold] = !d.open; saveState(); }
+  }, true);
+  $('readoutBox').addEventListener('toggle', () => {
+    S.fold[`${S.tool}|__readout`] = !$('readoutBox').open;
+    saveState();
+    if ($('readoutBox').open && lastOut) renderReadout(lastOut.out.spec);
+  });
+  $('btnCollapseAll').addEventListener('click', () => setAllFolds(true));
+  $('btnExpandAll').addEventListener('click', () => setAllFolds(false));
   darkMQ.addEventListener('change', () => renderTool());
   $('btnShare').addEventListener('click', share);
   $('btnAbout').addEventListener('click', openAbout);

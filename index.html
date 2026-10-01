@@ -129,8 +129,36 @@
   .msg.info { color: var(--muted); }
   .msg[hidden] { display: none; }
 
+  /* ---------- 摺疊（details） ---------- */
+  details > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::after {
+    content: ""; width: 7px; height: 7px; margin-left: auto; margin-right: 4px;
+    border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+    transform: rotate(45deg) translateY(-2px); transition: transform 0.2s;
+  }
+  details:not([open]) > summary::after { transform: rotate(-45deg); }
+  .panel { margin-bottom: 14px; }
+  .panel > summary { font-size: 13px; font-weight: 600; color: var(--accent); padding: 2px 2px 8px; letter-spacing: 0.04em; }
+  .panel .readout { margin-bottom: 0; }
+  .resbar { display: flex; justify-content: flex-end; gap: 8px; margin: 4px 0 -6px; }
+  .resbar button { border: 1px solid var(--line); background: transparent; color: var(--muted); border-radius: 6px;
+    font-size: 12px; padding: 4px 10px; }
+  .resbar button:active { background: var(--field); }
+
+  /* ---------- DL / UL 雙欄 ---------- */
+  .dual { display: grid; grid-template-columns: minmax(78px, auto) 1fr 1fr; gap: 8px; align-items: center; width: 100%; }
+  .dual.single { grid-template-columns: minmax(78px, auto) 1fr; }
+  .dual-head { font-size: 12px; color: var(--muted); text-align: right; padding-right: 10px; letter-spacing: 0.06em; }
+  .dual label small { display: block; color: var(--muted); font-size: 12px; }
+  .dual input { width: 100%; min-width: 0; border: 1px solid transparent; border-radius: 6px; background: var(--field);
+    padding: 8px 10px; font-variant-numeric: tabular-nums; text-align: right; }
+  .dual input:focus { border-color: var(--accent); outline: none; }
+  .dual input[disabled] { color: var(--muted); }
+
   /* ---------- 結果 ---------- */
-  .group h2 { font-size: 13px; font-weight: 600; color: var(--accent); margin: 20px 2px 6px; letter-spacing: 0.04em; }
+  .group > summary { margin: 20px 2px 6px; }
+  .group h2 { font-size: 13px; font-weight: 600; color: var(--accent); margin: 0; letter-spacing: 0.04em; }
   .group dl { margin: 0; background: var(--card); border-radius: 8px; border: 1px solid var(--line); padding: 0 16px; }
   .row { display: flex; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
   .row:last-child { border-bottom: 0; }
@@ -206,9 +234,16 @@
       <span data-i18n>點選 Safari 下方的「分享」→「加入主畫面」，之後沒有網路也能使用。</span>
       <button id="installTipClose" aria-label="關閉提示" data-i18n-aria>×</button>
     </div>
-    <section class="readout" id="readout" aria-label="頻譜示意"></section>
+    <details class="panel" id="readoutBox" open>
+      <summary><span id="readoutTitle" data-i18n>頻譜示意</span></summary>
+      <section class="readout" id="readout"></section>
+    </details>
     <section class="card" id="inputs"></section>
     <div class="msg" id="msg" role="status" hidden></div>
+    <div class="resbar">
+      <button type="button" id="btnCollapseAll" data-i18n>全部收合</button>
+      <button type="button" id="btnExpandAll" data-i18n>全部展開</button>
+    </div>
     <section id="results"></section>
   </main>
 
