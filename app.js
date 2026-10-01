@@ -5,7 +5,7 @@
 (function () {
   'use strict';
 
-  const APP_VERSION = '1.5.0';
+  const APP_VERSION = '1.6.0';
   const CACHE_NAME = 'rfcalc-' + APP_VERSION;
   const R = window.RFCore;
   const { fmt } = R;
@@ -17,6 +17,27 @@
   };
   const TAB_THEME = { CELL: 'LTE', WIFI: 'WIFI', GNSS: 'GNSS', CABLE: 'CABLE', FSPL: 'FSPL' };
   const darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
+
+  // ------------------------------------------------------------ 外觀（跟隨系統 / 淺色 / 深色）
+  const THEMES = ['auto', 'light', 'dark'];
+  const THEME_LABEL = { auto: '外觀：跟隨系統', light: '外觀：淺色模式', dark: '外觀：深色模式' };
+  const THEME_ICON = {
+    auto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></svg>',
+    light: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.6 1.6M17.8 17.8l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.6-1.6M17.8 6.2l1.6-1.6"/></svg>',
+    dark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z"/></svg>',
+  };
+  let themeMode = (() => {
+    try { const v = localStorage.getItem('rfcalc.theme'); if (THEMES.includes(v)) return v; } catch (e) { /* 忽略 */ }
+    return 'auto';
+  })();
+  const isDark = () => themeMode === 'dark' || (themeMode === 'auto' && darkMQ.matches);
+  function applyThemeMode() {
+    const root = document.documentElement;
+    if (themeMode === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', themeMode);
+    document.querySelector('meta[name="theme-color"]').setAttribute('content', isDark() ? '#1E1D1A' : '#F3F0E9');
+    const btn = document.getElementById('btnTheme');
+    if (btn) { btn.innerHTML = THEME_ICON[themeMode]; btn.setAttribute('aria-label', tr(THEME_LABEL[themeMode])); btn.title = tr(THEME_LABEL[themeMode]); }
+  }
 
   // ------------------------------------------------------------ 語言
   const I18N = window.RF_I18N || {};
@@ -74,7 +95,7 @@
   let lastOut = null;
 
   // ------------------------------------------------------------ 主題
-  const accentOf = (key) => THEME[key][darkMQ.matches ? 1 : 0];
+  const accentOf = (key) => THEME[key][isDark() ? 1 : 0];
   function applyTheme(key) {
     const acc = accentOf(key);
     const root = document.documentElement.style;
@@ -780,6 +801,7 @@
     document.documentElement.lang = lang === 'en' ? 'en' : 'zh-Hant';
     $('btnLang').textContent = lang === 'en' ? '中' : 'EN';
     $('btnLang').setAttribute('aria-label', lang === 'en' ? '切換為中文' : 'Switch to English');
+    applyThemeMode();
     document.querySelectorAll('[data-i18n]').forEach((n) => {
       if (!n.dataset.zh) n.dataset.zh = n.textContent;
       n.textContent = tr(n.dataset.zh);
@@ -820,7 +842,13 @@
   });
   $('btnCollapseAll').addEventListener('click', () => setAllFolds(true));
   $('btnExpandAll').addEventListener('click', () => setAllFolds(false));
-  darkMQ.addEventListener('change', () => renderTool());
+  darkMQ.addEventListener('change', () => { if (themeMode === 'auto') renderTool(); });
+  $('btnTheme').addEventListener('click', () => {
+    themeMode = THEMES[(THEMES.indexOf(themeMode) + 1) % THEMES.length];
+    try { localStorage.setItem('rfcalc.theme', themeMode); } catch (e) { /* 忽略 */ }
+    renderTool();
+    toast(THEME_LABEL[themeMode]);
+  });
   $('btnShare').addEventListener('click', share);
   $('btnAbout').addEventListener('click', openAbout);
   $('sheetClose').addEventListener('click', closeSheet);

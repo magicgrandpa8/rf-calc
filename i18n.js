@@ -386,6 +386,11 @@ window.RF_I18N = {
 "全部收合": "Collapse all",
 "全部展開": "Expand all",
 "接收功率曲線": "Received power curve",
+"外觀": "Appearance",
+"跟隨系統": "follow system",
+"淺色模式": "light",
+"深色模式": "dark",
+"切換外觀": "Change appearance",
 "目前 EARFCN 的頻道邊緣超出頻段範圍，請調整 EARFCN 或頻寬。": "Channel edges at this EARFCN fall outside the band. Adjust the EARFCN or bandwidth.",
 "目前 NR-ARFCN 的頻道邊緣超出頻段範圍，請調整 NR-ARFCN 或頻寬。": "Channel edges at this NR-ARFCN fall outside the band. Adjust the NR-ARFCN or bandwidth.",
 "2.4 GHz 通道 12–14 並非所有國家/地區皆開放使用。": "2.4 GHz channels 12–14 are not permitted in every country or region.",
@@ -450,5 +455,8 @@ window.RF_I18N = {
 "此 DL 頻點無對應 UL（僅能作為 CA 下行）。": "This DL channel has no paired UL (CA downlink only).",
 "UL / DL 同頻（TDD）": "UL / DL share the frequency (TDD)",
 "UL / DL 同頻（主通道）": "UL / DL share the frequency (primary)",
-"已換算至最近通道": "Converted to the nearest channel"
+"已換算至最近通道": "Converted to the nearest channel",
+"外觀：跟隨系統": "Appearance: follow system",
+"外觀：淺色模式": "Appearance: light",
+"外觀：深色模式": "Appearance: dark"
 };

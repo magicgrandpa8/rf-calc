@@ -1,6 +1,6 @@
 # RF Band Calculator — 手機離線版（PWA）
 
-目前版本 **v1.5.0**：4G LTE / 5G NR、Wi-Fi、GNSS、Cable Loss、FSPL，支援中文 / English。
+目前版本 **v1.6.0**：4G LTE / 5G NR、Wi-Fi、GNSS、Cable Loss、FSPL，支援中文 / English。
 安裝到 iPhone / Android 主畫面後，**開飛航模式也能使用**。完全免費，不需要 App Store。
 
 ## 檔案
@@ -71,6 +71,9 @@
 ---
 
 ## 版本紀錄
+
+### v1.6.0
+* 新增外觀切換：右上角按鈕依序切換「跟隨系統 → 淺色 → 深色」，選擇會記住
 
 ### v1.5.0
 * 行動網路 / Wi-Fi 頻譜圖中心標籤同時顯示頻率與通道號（例：2140 MHz · EARFCN 300、5290 MHz · CH 58）

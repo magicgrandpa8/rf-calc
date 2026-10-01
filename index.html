@@ -3,8 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#F3F0E9" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#1E1D1A" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F3F0E9">
+<script>
+  /* 在畫面繪製前套用外觀設定，避免閃爍 */
+  (function () {
+    var t = 'auto';
+    try { t = localStorage.getItem('rfcalc.theme') || 'auto'; } catch (e) {}
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+    var dark = t === 'dark' || (t === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.querySelector('meta[name="theme-color"]').setAttribute('content', dark ? '#1E1D1A' : '#F3F0E9');
+  })();
+</script>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -37,14 +46,24 @@
     color-scheme: light dark;
     box-sizing: border-box;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
+  /* 深色：手動選擇深色，或「跟隨系統」且系統為深色 */
+  :root[data-theme="dark"] {
       --bg: #1E1D1A; --card: #282623; --text: #E8E4DA; --muted: #9D978C; --line: #383530; --field: #312E2A;
       --brand: #C0636B; --err: #D9827A; --warn: #D9AE62; --ok: #9BBFA9;
       --p-bg: #2D2A26; --p-text: #E8E4DA; --p-muted: #9D978C; --p-bar: #3E3A34; --p-slot: #4A453E;
       --p-grid: #3E3A34; --p-other: #6B655B; --p-red: #D9827A; --p-red-text: #E7A39C; --p-amber: #D9AE62;
+      color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]):not([data-theme="dark"]) {
+      --bg: #1E1D1A; --card: #282623; --text: #E8E4DA; --muted: #9D978C; --line: #383530; --field: #312E2A;
+      --brand: #C0636B; --err: #D9827A; --warn: #D9AE62; --ok: #9BBFA9;
+      --p-bg: #2D2A26; --p-text: #E8E4DA; --p-muted: #9D978C; --p-bar: #3E3A34; --p-slot: #4A453E;
+      --p-grid: #3E3A34; --p-other: #6B655B; --p-red: #D9827A; --p-red-text: #E7A39C; --p-amber: #D9AE62;
+      color-scheme: dark;
     }
   }
+  :root[data-theme="light"] { color-scheme: light; }
   *, *::before, *::after { box-sizing: inherit; }
   html, body { margin: 0; height: 100%; }
   body {
@@ -216,6 +235,7 @@
       <span class="brandmark" aria-hidden="true"></span>
       <h1 id="title">4G LTE</h1>
       <button class="iconbtn langbtn" id="btnLang" aria-label="切換語言">EN</button>
+      <button class="iconbtn" id="btnTheme" aria-label="切換外觀"></button>
       <button class="iconbtn" id="btnTable" aria-label="總表" data-i18n-aria>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 9.5v10"/></svg>
       </button>
